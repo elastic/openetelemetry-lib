@@ -386,6 +386,146 @@ func TestElasticTransactionEnrich(t *testing.T) {
 	}
 }
 
+// Tests root spans that represent a dependency and are mapped to a transaction.
+func TestRootSpanAsDependencyEnrich(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		input             ptrace.Span
+		config            config.Config
+		enrichedAttrs     map[string]any
+		expectedSpanLinks *ptrace.SpanLinkSlice
+	}{
+		{
+			name: "outgoing_http_root_span",
+			input: func() ptrace.Span {
+				span := ptrace.NewSpan()
+				span.SetName("rootClientSpan")
+				span.SetSpanID([8]byte{1})
+				span.SetKind(ptrace.SpanKindClient)
+				span.Attributes().PutStr(semconv.AttributeHTTPMethod, "GET")
+				span.Attributes().PutStr(semconv.AttributeHTTPURL, "http://localhost:8080")
+				span.Attributes().PutInt(semconv.AttributeHTTPResponseStatusCode, 200)
+				span.Attributes().PutStr(semconv.AttributeNetworkProtocolVersion, "1.1")
+				return span
+			}(),
+			config: config.Enabled(),
+			enrichedAttrs: map[string]any{
+				AttributeTimestampUs:                    int64(0),
+				AttributeTransactionName:                "rootClientSpan",
+				AttributeProcessorEvent:                 "transaction",
+				AttributeSpanType:                       "external",
+				AttributeSpanSubtype:                    "http",
+				AttributeSpanDestinationServiceResource: "localhost:8080",
+				AttributeSpanName:                       "rootClientSpan",
+				AttributeEventOutcome:                   "success",
+				AttributeSuccessCount:                   int64(1),
+				AttributeServiceTargetName:              "localhost:8080",
+				AttributeServiceTargetType:              "http",
+				AttributeTransactionID:                  "0100000000000000",
+				AttributeTransactionDurationUs:          int64(0),
+				AttributeTransactionRepresentativeCount: float64(1),
+				AttributeTransactionResult:              "HTTP 2xx",
+				AttributeTransactionType:                "external.http",
+				AttributeTransactionSampled:             true,
+				AttributeTransactionRoot:                true,
+			},
+		},
+		{
+			name: "db_root_span",
+			input: func() ptrace.Span {
+				span := ptrace.NewSpan()
+				span.SetName("rootClientSpan")
+				span.SetSpanID([8]byte{1})
+				span.SetKind(ptrace.SpanKindClient)
+				span.Attributes().PutStr(semconv.AttributeDBSystem, "mssql")
+
+				span.Attributes().PutStr(semconv.AttributeDBName, "myDb")
+				span.Attributes().PutStr(semconv.AttributeDBOperation, "SELECT")
+				span.Attributes().PutStr(semconv.AttributeDBStatement, "SELECT * FROM wuser_table")
+				return span
+			}(),
+			config: config.Enabled(),
+			enrichedAttrs: map[string]any{
+				AttributeTimestampUs:                    int64(0),
+				AttributeTransactionName:                "rootClientSpan",
+				AttributeProcessorEvent:                 "transaction",
+				AttributeSpanType:                       "db",
+				AttributeSpanSubtype:                    "mssql",
+				AttributeSpanDestinationServiceResource: "mssql",
+				AttributeSpanName:                       "rootClientSpan",
+				AttributeEventOutcome:                   "success",
+				AttributeSuccessCount:                   int64(1),
+				AttributeServiceTargetName:              "myDb",
+				AttributeServiceTargetType:              "mssql",
+				AttributeTransactionID:                  "0100000000000000",
+				AttributeTransactionDurationUs:          int64(0),
+				AttributeTransactionRepresentativeCount: float64(1),
+				AttributeTransactionResult:              "Success",
+				AttributeTransactionType:                "db.mssql",
+				AttributeTransactionSampled:             true,
+				AttributeTransactionRoot:                true,
+			},
+		},
+		{
+			name: "producer_messaging_span",
+			input: func() ptrace.Span {
+				span := ptrace.NewSpan()
+				span.SetName("rootClientSpan")
+				span.SetSpanID([8]byte{1})
+				span.SetKind(ptrace.SpanKindProducer)
+
+				span.Attributes().PutStr(semconv.AttributeServerAddress, "myServer")
+				span.Attributes().PutStr(semconv.AttributeServerPort, "1234")
+				span.Attributes().PutStr(semconv.AttributeMessagingSystem, "rabbitmq")
+				span.Attributes().PutStr(semconv.AttributeMessagingDestinationName, "T")
+				span.Attributes().PutStr(semconv.AttributeMessagingOperation, "publish")
+				span.Attributes().PutStr(semconv.AttributeMessagingClientID, "a")
+				return span
+			}(),
+			config: config.Enabled(),
+			enrichedAttrs: map[string]any{
+				AttributeTimestampUs:                    int64(0),
+				AttributeTransactionName:                "rootClientSpan",
+				AttributeProcessorEvent:                 "transaction",
+				AttributeSpanType:                       "messaging",
+				AttributeSpanSubtype:                    "rabbitmq",
+				AttributeSpanDestinationServiceResource: "rabbitmq/T",
+				AttributeSpanName:                       "rootClientSpan",
+				AttributeEventOutcome:                   "success",
+				AttributeSuccessCount:                   int64(1),
+				AttributeServiceTargetName:              "T",
+				AttributeServiceTargetType:              "rabbitmq",
+				AttributeTransactionID:                  "0100000000000000",
+				AttributeTransactionDurationUs:          int64(0),
+				AttributeTransactionRepresentativeCount: float64(1),
+				AttributeTransactionResult:              "Success",
+				AttributeTransactionType:                "messaging.rabbitmq",
+				AttributeTransactionSampled:             true,
+				AttributeTransactionRoot:                true,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expectedSpan := ptrace.NewSpan()
+			tc.input.CopyTo(expectedSpan)
+
+			// Merge with the expected attributes and override the span links.
+			for k, v := range tc.enrichedAttrs {
+				expectedSpan.Attributes().PutEmpty(k).FromRaw(v)
+			}
+			// Override span links
+			if tc.expectedSpanLinks != nil {
+				tc.expectedSpanLinks.CopyTo(expectedSpan.Links())
+			} else {
+				expectedSpan.Links().RemoveIf(func(_ ptrace.SpanLink) bool { return true })
+			}
+
+			EnrichSpan(tc.input, tc.config)
+			assert.NoError(t, ptracetest.CompareSpan(expectedSpan, tc.input))
+		})
+	}
+}
+
 // Tests the enrichment logic for elastic's span definition.
 func TestElasticSpanEnrich(t *testing.T) {
 	now := time.Unix(3600, 0)
