@@ -244,39 +244,6 @@ func (s *spanEnrichmentContext) enrichTransaction(
 	}
 }
 
-// In OTel, a local span can represent an outgoing call or a producer span.
-// In such cases, the span is still mapped into a transaction, but enriched
-// with additional attributes that are specific to the outgoing call or producer span.
-func (s *spanEnrichmentContext) enrichExitSpanTransaction(
-	span ptrace.Span,
-	cfg config.Config,
-) {
-	if span.Kind() == ptrace.SpanKindClient || span.Kind() == ptrace.SpanKindProducer {
-		if cfg.Span.TypeSubtype.Enabled {
-			s.setSpanTypeSubtype(span)
-		}
-		if cfg.Span.ServiceTarget.Enabled {
-			s.setServiceTarget(span)
-		}
-		if cfg.Span.DestinationService.Enabled {
-			s.setDestinationService(span)
-		}
-		if cfg.Span.Name.Enabled {
-			span.Attributes().PutStr(AttributeSpanName, span.Name())
-		}
-		if cfg.Transaction.Type.Enabled {
-			spanTypeAttr, hasType := span.Attributes().Get(AttributeSpanType)
-			if hasType {
-				transactionType := spanTypeAttr.Str()
-				if spanSubtypeAttr, hasSubType := span.Attributes().Get(AttributeSpanSubtype); hasSubType {
-					transactionType += "." + spanSubtypeAttr.Str()
-				}
-				span.Attributes().PutStr(AttributeTransactionType, transactionType)
-			}
-		}
-	}
-}
-
 func (s *spanEnrichmentContext) enrichSpan(
 	span ptrace.Span,
 	cfg config.Config,
