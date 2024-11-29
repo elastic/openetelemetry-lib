@@ -187,11 +187,17 @@ func (s *spanEnrichmentContext) Enrich(span ptrace.Span, cfg config.Config) {
 }
 
 func (s *spanEnrichmentContext) enrich(span ptrace.Span, cfg config.Config) {
+
+	// In OTel, a local root span can represent an outgoing call or a producer span.
+	// In such cases, the span is still mapped into a transaction, but enriched
+	// with additional attributes that are specific to the outgoing call or producer span.
+	isExitRootSpan := s.isTransaction && span.Kind() == ptrace.SpanKindClient || span.Kind() == ptrace.SpanKindProducer
+
 	if s.isTransaction {
 		s.enrichTransaction(span, cfg.Transaction)
-		s.enrichExitSpanTransaction(span, cfg)
-	} else {
-		s.enrichSpan(span, cfg.Span)
+	}
+	if !s.isTransaction || isExitRootSpan {
+		s.enrichSpan(span, cfg, isExitRootSpan)
 	}
 }
 
@@ -238,8 +244,8 @@ func (s *spanEnrichmentContext) enrichTransaction(
 	}
 }
 
-// In OTel a root span can represent an outgoing call or a producer span
-// In such cases, the span is still mapped into a transaction, but such spans are enriched
+// In OTel, a local span can represent an outgoing call or a producer span.
+// In such cases, the span is still mapped into a transaction, but enriched
 // with additional attributes that are specific to the outgoing call or producer span.
 func (s *spanEnrichmentContext) enrichExitSpanTransaction(
 	span ptrace.Span,
@@ -273,38 +279,50 @@ func (s *spanEnrichmentContext) enrichExitSpanTransaction(
 
 func (s *spanEnrichmentContext) enrichSpan(
 	span ptrace.Span,
-	cfg config.ElasticSpanConfig,
+	cfg config.Config,
+	isExitRootSpan bool,
 ) {
-	if cfg.TimestampUs.Enabled {
+	if cfg.Span.TimestampUs.Enabled {
 		span.Attributes().PutInt(AttributeTimestampUs, getTimestampUs(span.StartTimestamp()))
 	}
-	if cfg.Name.Enabled {
+	if cfg.Span.Name.Enabled {
 		span.Attributes().PutStr(AttributeSpanName, span.Name())
 	}
-	if cfg.ProcessorEvent.Enabled {
-		span.Attributes().PutStr(AttributeProcessorEvent, "span")
-	}
-	if cfg.RepresentativeCount.Enabled {
+	if cfg.Span.RepresentativeCount.Enabled {
 		repCount := getRepresentativeCount(span.TraceState().AsRaw())
 		span.Attributes().PutDouble(AttributeSpanRepresentativeCount, repCount)
 	}
-	if cfg.TypeSubtype.Enabled {
+	if cfg.Span.TypeSubtype.Enabled {
 		s.setSpanTypeSubtype(span)
 	}
-	if cfg.EventOutcome.Enabled {
+	if cfg.Span.EventOutcome.Enabled {
 		s.setEventOutcome(span)
 	}
-	if cfg.DurationUs.Enabled {
+	if cfg.Span.DurationUs.Enabled {
 		span.Attributes().PutInt(AttributeSpanDurationUs, getDurationUs(span))
 	}
-	if cfg.ServiceTarget.Enabled {
+	if cfg.Span.ServiceTarget.Enabled {
 		s.setServiceTarget(span)
 	}
-	if cfg.DestinationService.Enabled {
+	if cfg.Span.DestinationService.Enabled {
 		s.setDestinationService(span)
 	}
-	if cfg.InferredSpans.Enabled {
+	if cfg.Span.InferredSpans.Enabled {
 		s.setInferredSpans(span)
+	}
+	if cfg.Span.ProcessorEvent.Enabled && !isExitRootSpan {
+		span.Attributes().PutStr(AttributeProcessorEvent, "span")
+	}
+
+	if isExitRootSpan && cfg.Transaction.Type.Enabled {
+		spanTypeAttr, hasType := span.Attributes().Get(AttributeSpanType)
+		if hasType {
+			transactionType := spanTypeAttr.Str()
+			if spanSubtypeAttr, hasSubType := span.Attributes().Get(AttributeSpanSubtype); hasSubType {
+				transactionType += "." + spanSubtypeAttr.Str()
+			}
+			span.Attributes().PutStr(AttributeTransactionType, transactionType)
+		}
 	}
 }
 

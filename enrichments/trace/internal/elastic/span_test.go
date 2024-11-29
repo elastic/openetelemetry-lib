@@ -428,6 +428,8 @@ func TestRootSpanAsDependencyEnrich(t *testing.T) {
 				AttributeTransactionType:                "external.http",
 				AttributeTransactionSampled:             true,
 				AttributeTransactionRoot:                true,
+				AttributeSpanDurationUs:                 int64(0),
+				AttributeSpanRepresentativeCount:        float64(1),
 			},
 		},
 		{
@@ -464,6 +466,8 @@ func TestRootSpanAsDependencyEnrich(t *testing.T) {
 				AttributeTransactionType:                "db.mssql",
 				AttributeTransactionSampled:             true,
 				AttributeTransactionRoot:                true,
+				AttributeSpanDurationUs:                 int64(0),
+				AttributeSpanRepresentativeCount:        float64(1),
 			},
 		},
 		{
@@ -502,6 +506,8 @@ func TestRootSpanAsDependencyEnrich(t *testing.T) {
 				AttributeTransactionType:                "messaging.rabbitmq",
 				AttributeTransactionSampled:             true,
 				AttributeTransactionRoot:                true,
+				AttributeSpanDurationUs:                 int64(0),
+				AttributeSpanRepresentativeCount:        float64(1),
 			},
 		},
 	} {
