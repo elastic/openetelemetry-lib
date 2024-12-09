@@ -277,8 +277,14 @@ func (s *spanEnrichmentContext) enrichSpan(
 	if cfg.Span.InferredSpans.Enabled {
 		s.setInferredSpans(span)
 	}
-	if cfg.Span.ProcessorEvent.Enabled && !isExitRootSpan {
-		span.Attributes().PutStr(AttributeProcessorEvent, "span")
+	if cfg.Span.ProcessorEvent.Enabled {
+		if isExitRootSpan {
+			attrSlice := span.Attributes().PutEmptySlice(AttributeProcessorEvent)
+			attrSlice.AppendEmpty().SetStr("transaction")
+			attrSlice.AppendEmpty().SetStr("span")
+		} else {
+			span.Attributes().PutStr(AttributeProcessorEvent, "span")
+		}
 	}
 
 	if isExitRootSpan && cfg.Transaction.Type.Enabled {
